@@ -180,9 +180,9 @@ library(clusterProfiler)
 library(knitr)
 ```
 
-To ensure reproducibility, the code below demonstrates how to access the dataset. Although a local copy is used here to speed up processing, the `recount` package can be used to download it directly.
+To ensure reproducibility, the code below demonstrates how to access the dataset. It's name is changed to improve clarity for downstream analysis.
 
-```{r download-data, eval=FALSE}
+```{r download-data}
 # Direct download of the bladder-specific file from recount
 download.file(
     url = "http://duffel.rail.bio/recount/v2/TCGA/rse_gene_bladder.Rdata",
