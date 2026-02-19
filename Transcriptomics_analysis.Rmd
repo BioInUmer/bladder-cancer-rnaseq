@@ -1,0 +1,554 @@
+---
+title: "RNA-Seq Analysis: Bladder Cancer"
+subtitle: "Differential Expression Analysis of Early vs. Late Stage"
+author: "Muhammad Umer Hussain Kousar"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: simplex
+    highlight: pygments
+    toc: true
+    toc_float: false
+    code_folding: hide
+    number_sections: false
+    fig_caption: true
+---
+
+<style>
+/* Custom Minimalist Theme - Nature Style */
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Lato:wght@300;400;700&display=swap');
+
+body {
+    font-family: 'Merriweather', serif;
+    font-size: 16px;
+    line-height: 1.8;
+    color: #222;
+    background-color: #fff;
+    /* Remove restrictive max-width to let content fill more space */
+    max-width: 95%; 
+    margin-left: auto;
+    margin-right: auto;
+    padding: 2em;
+}
+
+
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Lato', sans-serif;
+    color: #111;
+    font-weight: 700;
+    margin-top: 2.5em;
+    margin-bottom: 0.8em;
+}
+
+h1 {
+    font-size: 2.5em;
+    border-bottom: 2px solid #333;
+    padding-bottom: 0.5em;
+}
+
+h2 {
+    font-size: 1.8em;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.3em;
+}
+
+a {
+    color: #d9230f; /* Nature Red */
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-bottom 0.3s ease;
+}
+
+a:hover {
+    border-bottom: 1px solid #d9230f;
+    text-decoration: none;
+}
+
+/* Code Folding Button Styling */
+.btn-default {
+    background-color: #fff;
+    color: #e8eaed;
+    border: 1px solid #ddd;
+    font-family: 'Lato', sans-serif;
+    font-size: 0.9em;
+    padding: 5px 12px;
+    border-radius: 4px;
+    /* Smoother transition for hover state */
+    transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.btn-default:hover, .btn-default:focus {
+    background-color: #45475a;
+    color: #ffffff;
+    border-color: #bbb;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.08);
+    transform: translateY(-1px);
+}
+
+/* Smoother Unfolding Animation */
+.collapse {
+    transition: height 0.6s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* Optional: Fade in the code block content */
+pre {
+    background-color: #f9f9f9;
+    border: none;
+    border-left: 4px solid #ddd;
+    padding: 1em;
+    font-size: 0.8em;
+    line-height: 1.4;
+    border-radius: 0;
+    transition: opacity 0.3s ease-in-out;
+}
+
+/* Highlighted code block container */
+div.sourceCode {
+    overflow-x: auto;
+    transition: max-height 0.5s ease-in-out;
+}
+
+/* Caption Styling */
+.caption {
+    font-family: 'Lato', sans-serif;
+    font-size: 0.9em;
+    color: #666;
+    margin-top: 0.5em;
+    margin-bottom: 2em;
+    text-align: center;
+}
+
+/* Abstract / Quote Block */
+blockquote {
+    font-style: italic;
+    border-left: 4px solid #d9230f;
+    padding-left: 1em;
+    color: #555;
+    margin: 1.5em 0;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    cache = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.align = "center",
+    fig.width = 10,
+    fig.height = 6
+)
+# Force Code Folding button text if possible (standard is usually "Code")
+```
+
+# Introduction
+
+## Dataset Description
+
+The dataset used in this analysis was obtained from **Recount**, a repository of RNA-seq data available at <https://jhubiostatistics.shinyapps.io/recount/> [1]. From the gene column in the TCGA tab, the Ranged Summarized Experiment (RSE) object for bladder cancer (version 2) was downloaded (`rse_gene_bladder`). This dataset contains gene expression profiles alongside clinical metadata, providing the foundation for an investigation into the transcriptomic landscape of bladder carcinoma.
+
+## Tumor Selection
+
+Bladder cancer was selected for this analysis due to its high prevalence — it is the ninth most common cancer worldwide, with roughly 1.9 million people currently living with the disease. Males account for approximately 75% of the total burden, highlighting a significant gender disparity [2]. Additionally, this cancer type holds personal significance, as a close relative was recently diagnosed with early-stage bladder cancer, which motivated this investigation into the molecular mechanisms that distinguish early from late disease stages.
+
+Samples were categorized into two groups based on the `gdc_cases.diagnoses.tumor_stage` metadata:
+
+-   **Early Stage**: Defined as Stage I and Stage II (including sub-stages like Ia, Ib, IIa, IIb).
+-   **Late Stage**: Defined as Stage III and Stage IV (including sub-stages).
+
+This binary classification allows for a focused comparison between localized and advanced metastatic disease states.
+
+# Methods
+
+## Data Acquisition & Preprocessing
+
+The primary data consists of raw read counts mapped to genes, encapsulated in the `rse_gene_bladder` object. This object initially contained expression data for 433 samples; however, 2 samples were excluded due to missing tumor stage information (categorized as NA), resulting in a final analytic cohort of 431 samples. The analysis pipeline relied on core Bioconductor packages, including `SummarizedExperiment` for data handling, `DESeq2` for differential expression, and `clusterProfiler` [3] for functional enrichment.
+
+```{r load-libraries, message=FALSE, warning=FALSE}
+# Load Required Libraries
+library(SummarizedExperiment)
+library(stats)
+library(ggplot2)
+library(ggfortify)
+library(EDASeq)
+library(pheatmap)
+library(DESeq2)
+library(EnhancedVolcano)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(knitr)
+```
+
+To ensure reproducibility, the code below demonstrates how to access the dataset. Although a local copy is used here to speed up processing, the `recount` package can be used to download it directly.
+
+```{r download-data, eval=FALSE}
+# Direct download of the bladder-specific file from recount
+download.file(
+    url = "http://duffel.rail.bio/recount/v2/TCGA/rse_gene_bladder.Rdata",
+    destfile = "rse_gene_bladder.Rdata",
+    mode = "wb"
+)
+load("rse_gene_bladder.Rdata")
+rse_gene_bladder <- rse_gene
+remove(rse_gene)
+```
+
+The samples are categorized into "Early" and "Late" stages based on clinical metadata.
+
+```{r create-groups}
+# Extract tumor stage information
+stage_bladder <- rse_gene_bladder$gdc_cases.diagnoses.tumor_stage
+
+# Define early stage samples (stage I-II)
+early_stages <- paste(
+    "stage i$", "stage ia$", "stage ib$", "stage ic$",
+    "stage ii$", "stage iia$", "stage iib$", "stage iic$",
+    sep = "|"
+)
+ids_early <- grep(early_stages, stage_bladder)
+
+# Define late stage samples (stage III-IV)
+late_stages <- paste(
+    "stage iii$", "stage iiia$", "stage iiib$", "stage iiic$",
+    "stage iv$", "stage iva$", "stage ivb$", "stage ivc$",
+    sep = "|"
+)
+ids_late <- grep(late_stages, stage_bladder)
+
+# Create GROUP variable
+colData(rse_gene_bladder)$GROUP <- rep(NA, ncol(rse_gene_bladder))
+colData(rse_gene_bladder)$GROUP[ids_early] <- "early"
+colData(rse_gene_bladder)$GROUP[ids_late] <- "late"
+
+# Remove samples without stage information
+rse_gene_bladder <- rse_gene_bladder[, !is.na(rse_gene_bladder$GROUP)]
+
+# Extract metadata and annotation
+metadata_bladder <- as.data.frame(colData(rse_gene_bladder))
+annot_bladder <- rowRanges(rse_gene_bladder)
+bladder_geneLengths <- annot_bladder$bp_length
+
+# Display final sample count
+kable(table(rse_gene_bladder$GROUP), col.names = c("Stage", "Count"), caption = "Sample Distribution by Tumor Stage")
+```
+
+## Quality Control and Normalization
+
+Quality control was performed to assess gene expression distributions and identify potential outliers using Relative Log Expression (RLE) plots. Three normalization methods were evaluated: **CPM** (Counts Per Million), **RPKM** (Reads Per Kilobase Million), and **TPM** (Transcripts Per Million).
+
+Although CPM and RPKM normalizations produced distributions with medians marginally closer to zero, **TPM was ultimately selected**. Unlike CPM, TPM normalizes for gene length, permitting valid comparisons between genes. Additionally, unlike RPKM/FPKM, TPM guarantees that the sum of all normalized values remains constant across samples, ensuring that expression values represent a consistent proportion of the total transcript pool.
+
+```{r normalization}
+# Extract raw counts
+counts_bladder <- assay(rse_gene_bladder, "counts")
+
+# TPM Normalization
+rpk_bladder <- apply(counts_bladder, 2, function(x) {
+    x / (bladder_geneLengths / 1e3)
+})
+
+bladder_NormByTPM <- apply(rpk_bladder, 2, function(x) {
+    x / sum(as.numeric(x), na.rm = TRUE) * 1e6
+})
+
+# CPM Normalization for comparison
+bladder_NormByCPM <- sweep(counts_bladder, 2,
+    FUN = "/",
+    colSums(counts_bladder)
+) * 1e6
+
+# RPKM Normalization for comparison
+bladder_NormByRPKM <- t(t(counts_bladder / bladder_geneLengths * 1e3) /
+    colSums(counts_bladder) * 1e6)
+```
+
+## Differential Expression Analysis
+
+Differential expression analysis was conducted using `DESeq2` [4]. The workflow involved:
+
+1.  **Data Preparation**: TPM-normalized counts were rounded to integers.
+2.  **Filtering**: Genes with low expression (row sums $\le$ 50) were removed.
+3.  **Experimental Design**: A design formula of `~GROUP` was used.
+4.  **Significance Testing**: Wald tests identified differentially expressed (DE) genes between "late" and "early" groups.
+
+```{r differential-expression, message=FALSE}
+# Convert TPM to integer for DESeq2
+tpm_int <- round(bladder_NormByTPM)
+
+# Create DESeq2 dataset
+dds_bladder <- DESeqDataSetFromMatrix(
+    countData = tpm_int,
+    colData = colData(rse_gene_bladder),
+    design = ~GROUP
+)
+
+# Remove low count genes (keep genes with sum > 50 across all samples)
+dds_bladder <- dds_bladder[rowSums(counts(dds_bladder)) > 50, ]
+
+# Turn off internal normalization (data already normalized)
+sizeFactors(dds_bladder) <- rep(1, ncol(dds_bladder))
+
+# Perform differential expression analysis
+dds_bladder <- DESeq(dds_bladder)
+
+# Sample comparison: late stage vs early stage
+DEstage <- results(dds_bladder, contrast = c("GROUP", "late", "early"))
+DEstage <- DEstage[order(DEstage$pvalue), ]
+```
+
+## Functional Enrichment Analysis
+
+To understand the biological implications of the DE genes, functional enrichment analysis was performed using **DisGeNET** [5] (gene-disease associations) and **Gene Ontology** (GO) for Biological Processes. Significance was defined as an adjusted p-value < 0.05.
+
+# Results
+
+## Dataset Characteristics and Quality Metrics
+
+The processed dataset included a total of **431 samples**: 138 Early Stage and 293 Late Stage. Initial quality control using RLE plots revealed significant variability in library sizes in the raw data, which was effectively mitigated by normalization.
+
+```{r rle-raw, fig.cap="Figure 1: RLE plot for raw counts showing distribution of gene expression across samples."}
+set.seed(123)
+idx <- sample(ncol(counts_bladder), 100)
+idn <- sample(ncol(bladder_NormByTPM), 100)
+
+group_colors <- as.numeric(as.factor(colData(rse_gene_bladder)$GROUP))
+group_levels <- levels(as.factor(colData(rse_gene_bladder)$GROUP))
+
+plotRLE(
+    counts_bladder[, idx],
+    outline = FALSE,
+    ylim = c(-2, 2),
+    col = group_colors[idx],
+    main = "Raw Counts (Subset 100 samples)",
+    xaxt = "n"
+)
+legend("bottom", legend = group_levels, fill = 1:2, horiz = TRUE, xpd = TRUE, inset = -0.2, bty = "n")
+```
+
+## Normalization & Exploratory Analysis
+
+As noted above, TPM normalization provided a robust basis for downstream comparison.
+
+```{r rle-normalized, fig.height=10, fig.width=8, fig.cap="Figure 2: RLE plots for normalized counts using TPM, CPM, and RPKM."}
+par(mfrow = c(3, 1))
+
+# TPM
+plotRLE(
+    bladder_NormByTPM[, idn],
+    outline = FALSE, ylim = c(-2, 2), col = group_colors[idn],
+    main = "TPM Normalized Counts", xaxt = "n"
+)
+legend("bottom", legend = group_levels, fill = 1:2, horiz = TRUE, xpd = TRUE, inset = -0.15, bty = "n")
+
+# CPM
+plotRLE(
+    bladder_NormByCPM[, idn],
+    outline = FALSE, ylim = c(-2, 2), col = group_colors[idn],
+    main = "CPM Normalized Counts", xaxt = "n"
+)
+legend("bottom", legend = group_levels, fill = 1:2, horiz = TRUE, xpd = TRUE, inset = -0.15, bty = "n")
+
+# RPKM
+plotRLE(
+    bladder_NormByRPKM[, idn],
+    outline = FALSE, ylim = c(-2, 2), col = group_colors[idn],
+    main = "RPKM Normalized Counts", xaxt = "n"
+)
+legend("bottom", legend = group_levels, fill = 1:2, horiz = TRUE, xpd = TRUE, inset = -0.15, bty = "n")
+```
+
+An analysis of the top 100 most variable genes was used to validate the data structure. The resulting heatmap (Figure 3) shows clear biological clustering of samples.
+
+```{r gene-selection-heatmap, fig.cap="Figure 3: Heatmap showing hierarchical clustering of top 100 most variable genes across 100 randomly selected samples."}
+# Compute variance
+bladder_V <- apply(bladder_NormByTPM, 1, var)
+bladder_selectedGenes <- names(sort(bladder_V, decreasing = TRUE)[1:100])
+
+# Heatmap
+set.seed(123)
+id <- sample(ncol(bladder_NormByTPM), 100)
+pheatmap(
+    bladder_NormByTPM[bladder_selectedGenes, id],
+    scale = "row",
+    show_rownames = FALSE, show_colnames = FALSE,
+    main = "Heatmap of Top 100 Variable Genes"
+)
+```
+
+Notably, PCA revealed a gradient-like separation between Early and Late tumor stages (Figure 4), with Early samples gradually transitioning into Late samples along the principal components. A secondary PCA colored by gender (Figure 5) showed no discernible clustering, indicating that gender does not meaningfully contribute to expression variance.
+
+```{r pca, fig.cap="Figure 4: Principal Component Analysis (PCA) of bladder cancer samples colored by tumor stage (early vs late)."}
+# Prepare data for PCA
+M_bladder <- t(bladder_NormByTPM[bladder_selectedGenes, ])
+M_bladder <- log2(M_bladder + 1)
+bladder_pcaResults <- prcomp(M_bladder)
+
+autoplot(bladder_pcaResults, data = metadata_bladder, colour = "GROUP") +
+    theme_linedraw() +
+    labs(title = "PCA by Stage") +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+```{r pca-gender, fig.cap="Figure 5: PCA of bladder cancer samples colored by gender."}
+autoplot(bladder_pcaResults, data = metadata_bladder, colour = "xml_gender") +
+    theme_linedraw() +
+    labs(title = "PCA by Gender") +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+## Differentially Expressed Genes
+
+A total of **30,871 genes** were tested. Using a significance threshold of adjusted p-value < 0.05 and an absolute log2 fold change > 1, **737 differentially expressed genes** were identified.
+
+```{r identify-de-genes}
+# Significance thresholds
+mask <- DEstage$padj < 0.05 & !is.na(DEstage$padj) & abs(DEstage$log2FoldChange) > log2(2)
+
+deGenes <- rownames(DEstage[mask, ])
+n_up <- sum(mask & DEstage$log2FoldChange > 1)
+n_down <- sum(mask & DEstage$log2FoldChange < -1)
+
+# Display summary table
+de_summary <- data.frame(
+    Category = c("Total Genes Tested", "Significant DE Genes", "Up-regulated (Late)", "Down-regulated (Late)"),
+    Count = c(nrow(DEstage), length(deGenes), n_up, n_down)
+)
+kable(de_summary, caption = "Result: Differential Expression Summary")
+```
+
+The MA plot and Volcano plot illustrate these findings, revealing a notable skew toward upregulation in late-stage tumors.
+
+```{r ma-plot, fig.cap="Figure 6: MA plot showing the relationship between mean expression and log2 fold change for differentially expressed genes."}
+DESeq2::plotMA(DEstage, ylim = c(-5, 5), main = "MA Plot: Late vs Early Stage")
+```
+
+```{r p-distribution, fig.cap="Figure 7: Histogram showing the distribution of p-values."}
+ggplot(data = as.data.frame(DEstage), aes(x = pvalue)) +
+    geom_histogram(bins = 100, fill = "steelblue", color = "black") +
+    theme_linedraw() +
+    labs(title = "Distribution of P-values", x = "P-value", y = "Frequency")
+```
+
+```{r volcano-plot, fig.height=8, fig.width=10, warning=FALSE, fig.cap="Figure 8: Volcano plot displaying differentially expressed genes between late and early stage bladder cancer."}
+EnhancedVolcano(
+    DEstage,
+    lab = rownames(DEstage),
+    x = "log2FoldChange",
+    y = "pvalue",
+    title = "Volcano Plot: Late vs Early Stage",
+    subtitle = "Differential Gene Expression Analysis"
+)
+```
+
+The top 6 differentially expressed genes include markers that likely play a role in driving progression toward a more aggressive phenotype.
+
+```{r plot-top-genes, fig.cap="Figure 9: Expression of top 6 differentially expressed genes by bladder cancer stage."}
+top6_genes <- rownames(DEstage)[1:6]
+plot_data <- data.frame()
+
+for (gene in top6_genes) {
+    data <- plotCounts(dds_bladder, gene = gene, intgroup = "GROUP", returnData = TRUE)
+    data$gene <- gene
+    plot_data <- rbind(plot_data, data)
+}
+
+ggplot(plot_data, aes(x = GROUP, y = count, fill = GROUP)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(width = 0.1, alpha = 0.5, size = 1) +
+    scale_y_log10() +
+    facet_wrap(~gene, scales = "free_y", ncol = 3) +
+    theme_bw() +
+    labs(title = "Top 6 DE Genes", x = "Stage", y = "Normalized Counts (Log10)") +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "none")
+```
+
+## Enrichment Analysis Findings
+
+Enrichment analysis revealed significant associations with biological processes relevant to tissue remodeling and disease progression.
+
+```{r enrichment-setup, echo=FALSE}
+# Gene Universe Definition & ID Conversion
+geneUniverse <- rownames(DEstage[!is.na(DEstage$pvalue), ])
+deGenes_clean <- gsub("\\..*", "", deGenes)
+universe_clean <- gsub("\\..*", "", geneUniverse)
+
+deGenes_entrez <- unlist(mget(deGenes_clean, envir = org.Hs.egENSEMBL2EG, ifnotfound = NA))
+geneUniverse_entrez <- unlist(mget(universe_clean, envir = org.Hs.egENSEMBL2EG, ifnotfound = NA))
+
+deGenes_entrez <- deGenes_entrez[!is.na(deGenes_entrez)]
+geneUniverse_entrez <- geneUniverse_entrez[!is.na(geneUniverse_entrez)]
+```
+
+The DisGeNET analysis highlights associations with vascular pathologies, likely reflecting underlying tumor angiogenesis.
+
+```{r disgenet-enrichment, fig.height=8, fig.width=10, fig.cap="Figure 10: Top 20 disease associations of DE Genes (DisGeNET)."}
+# Load DisGeNET curated gene-disease associations
+# Source: https://github.com/isglobal-brge/brgeUtils/blob/cd93c6afb5fa5f71b2da07b8d5217be2c01eb24b/annots/curated_gene_disease_associations.tsv.gz
+gda <- read.delim("curated_gene_disease_associations.tsv.gz")
+disease2gene <- gda[, c("diseaseId", "geneId")]
+disease2name <- gda[, c("diseaseId", "diseaseName")]
+
+ans_dis <- enricher(
+    gene = deGenes_entrez, universe = geneUniverse_entrez,
+    TERM2GENE = disease2gene, TERM2NAME = disease2name
+)
+
+# Sort & Filter
+tab_dis <- subset(as.data.frame(ans_dis), Count > 5)
+tab_dis_sorted <- tab_dis[order(tab_dis$p.adjust), ]
+
+dotplot(ans_dis, showCategory = 20) +
+    ggtitle("Top 20 Enriched Diseases (DisGeNET)") +
+    theme_bw() +
+    theme(axis.text.y = element_text(size = 10), plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+The Gene Ontology analysis shows strong enrichment for muscle system processes and extracellular matrix organization.
+
+```{r go-enrichment, fig.height=8, fig.width=10, fig.cap="Figure 11: Gene Ontology enrichment analysis showing top 20 biological processes."}
+ego <- enrichGO(
+    gene = deGenes_entrez, universe = geneUniverse_entrez,
+    OrgDb = org.Hs.eg.db, ont = "BP", pAdjustMethod = "BH",
+    pvalueCutoff = 0.05, readable = TRUE
+)
+
+dotplot(ego, showCategory = 20) +
+    ggtitle("GO Biological Processes (Early vs Late Stage)") +
+    theme_bw() +
+    theme(axis.text.y = element_text(size = 10), plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+# Discussion
+
+## Biological Interpretation
+
+The transition from early to late-stage bladder cancer involves tumor invasion into the muscularis propria, a finding strongly supported by the results of this analysis. The enrichment of "muscle system process" and "muscle contraction" among DE genes likely reflects the inclusion of muscle tissue in invasive late-stage samples compared to superficial early-stage samples. Upregulation of extracellular matrix organization genes further points to active tissue remodeling associated with invasion and metastasis.
+
+The enrichment of cardiovascular and hypertensive terms suggests active angiogenesis. As tumors invade deeper tissues, they require increased blood supply for metabolic demands. Late-stage bladder tumors exhibit higher microvessel density and angiogenic factor expression than early-stage tumors [6], involving vascular remodeling and endothelial cell recruitment, processes sharing core gene sets with systemic vascular diseases [7].
+
+## Key Findings and Implications
+
+1.  **Distinct Transcriptomic Signatures**: There is a clear molecular distinction between early and late stages, driven largely by invasion-related processes.
+2.  **Potential Biomarkers**: The top DE genes could serve as biomarkers for determining the invasiveness of the tumor.
+3.  **Therapeutic Targets**: Pathways related to ECM remodeling might offer targets to prevent invasion.
+
+## Limitations and Future Directions
+
+Although the analysis successfully identified stage-specific signatures, several limitations should be acknowledged:
+
+-   **Sample Purity**: The muscle signature may reflect tissue sampling variability (tumor vs. tumor+muscle) rather than true tumor-intrinsic changes.
+-   **Clinical Heterogeneity**: The late group had \~100 more samples than the early group. Increasing early-stage sample size would improve statistical power.
+-   **Batch Effects**: Technical variation could introduce biases, though TPM normalization mitigates some of this.
+
+Future work could leverage single-cell RNA-seq to characterize the tumor microenvironment in greater detail and validate these findings in an independent cohort.
+
+# References
+
+1.  Collado-Torres, L., et al. (2017). Reproducible RNA-seq analysis using recount2. *Nature Biotechnology*, 35, 319-321.
+2.  Adalberto M. Filho, Alberto Briganti, Ahmedin Jemal, Freddie Bray. (2025). Bladder Cancer Incidence and Mortality: A Global Overview and Recent Trends. *European Urology*. ISSN 0302-2838.
+3.  Yu, G., et al. (2012). clusterProfiler: an R package for comparing biological themes among gene clusters. *OMICS*, 16(5), 284-287.
+4.  Love, M.I., Huber, W., & Anders, S. (2014). Moderated estimation of fold change and dispersion for RNA-seq data with DESeq2. *Genome Biology*, 15, 550.
+5.  Piñero, J., et al. (2017). DisGeNET: a comprehensive platform integrating information on human disease-associated genes and variants. *Nucleic Acids Research*, 45(D1), D833-D839.
+6.  Fus, L. P., & Pytel, A. (2019). Angiogenesis in bladder cancer. *Central European Journal of Urology*, 72(3), 268-273.
+7.  Streeter, E. H., & Harris, A. L. (2002). Angiogenesis in bladder cancer—prognostic marker and therapeutic target. *Surgical Oncology*, 11(1-2), 85-100.
