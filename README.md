@@ -19,7 +19,8 @@ The analysis walks through a complete RNA-seq differential expression pipeline i
 | File | Description |
 |------|-------------|
 | `Transcriptomics_analysis.Rmd` | R Markdown source with full code and narrative |
-| `Transcriptomics_analysis.html` | Rendered report ready for viewing |
+| `Transcriptomics_analysis.html` | [View the rendered report](https://BioInUmer.github.io/bladder-cancer-rnaseq/Transcriptomics_analysis.html) |
+
 
 > The raw data files are not included due to their size. See the report for download instructions and sources.
 
